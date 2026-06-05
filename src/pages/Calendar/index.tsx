@@ -23,29 +23,41 @@ import {
   Edit,
   Save,
   CheckCircle,
+  Plus,
+  Trash2,
+  Info,
 } from 'lucide-react';
 import { useAppStore } from '../../store';
 import type { MaintenancePlan } from '../../types';
 import { cn } from '../../lib/utils';
+
+interface ImportItem {
+  id: string;
+  trainId: string;
+  mileage: string;
+  level1Threshold: string;
+  level2Threshold: string;
+}
 
 export default function CalendarPage() {
   const {
     maintenancePlans,
     trains,
     teams,
-    generateMaintenanceSuggestion,
     updateMaintenancePlan,
+    batchGenerateSuggestions,
   } = useAppStore();
 
   const [currentMonth, setCurrentMonth] = useState(new Date());
 
   const [showImportModal, setShowImportModal] = useState(false);
-  const [importForm, setImportForm] = useState({
-    trainId: '',
-    mileage: '',
-    level: 'level1' as 'level1' | 'level2',
-    suggestedDate: format(new Date(), 'yyyy-MM-dd'),
-  });
+  const [importItems, setImportItems] = useState<ImportItem[]>([
+    { id: '1', trainId: '', mileage: '', level1Threshold: '4000', level2Threshold: '8000' },
+  ]);
+  const [importResult, setImportResult] = useState<{
+    success: string[];
+    failed: Array<{ trainNo: string; reason: string }>;
+  } | null>(null);
 
   const [showDetailModal, setShowDetailModal] = useState(false);
   const [selectedPlan, setSelectedPlan] = useState<MaintenancePlan | null>(null);
@@ -120,29 +132,68 @@ export default function CalendarPage() {
 
   const weekDays = ['日', '一', '二', '三', '四', '五', '六'];
 
+  const addImportItem = () => {
+    setImportItems([
+      ...importItems,
+      {
+        id: Date.now().toString(),
+        trainId: '',
+        mileage: '',
+        level1Threshold: '4000',
+        level2Threshold: '8000',
+      },
+    ]);
+  };
+
+  const removeImportItem = (id: string) => {
+    if (importItems.length > 1) {
+      setImportItems(importItems.filter((item) => item.id !== id));
+    }
+  };
+
+  const updateImportItem = (id: string, field: keyof ImportItem, value: string) => {
+    setImportItems(
+      importItems.map((item) => (item.id === id ? { ...item, [field]: value } : item))
+    );
+  };
+
   const handleImportSubmit = () => {
-    if (!importForm.trainId) {
-      alert('请选择车组');
+    const data = importItems
+      .filter((item) => item.trainId && item.mileage)
+      .map((item) => ({
+        trainId: item.trainId,
+        mileage: parseFloat(item.mileage),
+        level1Threshold: parseFloat(item.level1Threshold),
+        level2Threshold: parseFloat(item.level2Threshold),
+      }));
+
+    if (data.length === 0) {
+      setImportResult({
+        success: [],
+        failed: [{ trainNo: '全部', reason: '请至少填写一条完整的车组数据' }],
+      });
       return;
     }
-    generateMaintenanceSuggestion(
-      importForm.trainId,
-      importForm.level,
-      importForm.suggestedDate
-    );
-    setShowImportModal(false);
-    setImportForm({
-      trainId: '',
-      mileage: '',
-      level: 'level1',
-      suggestedDate: format(new Date(), 'yyyy-MM-dd'),
-    });
-    setShowSuccess('检修计划生成成功！');
-    setTimeout(() => setShowSuccess(''), 3000);
+
+    const result = batchGenerateSuggestions(data);
+    setImportResult(result);
+
+    if (result.success.length > 0) {
+      setShowSuccess(`成功生成 ${result.success.length} 条检修计划！`);
+      setTimeout(() => setShowSuccess(''), 5000);
+    }
+  };
+
+  const resetImportForm = () => {
+    setImportItems([
+      { id: '1', trainId: '', mileage: '', level1Threshold: '4000', level2Threshold: '8000' },
+    ]);
+    setImportResult(null);
   };
 
   const handlePlanClick = (plan: MaintenancePlan) => {
     setSelectedPlan(plan);
+    const teamName = teams.find((t) => t.id === plan.assignedTeam)?.name || '';
     setEditForm({
       plannedStartDate: plan.plannedStartDate,
       plannedEndDate: plan.plannedEndDate,
@@ -154,16 +205,27 @@ export default function CalendarPage() {
 
   const handleEditSubmit = () => {
     if (!selectedPlan) return;
+    const selectedTeam = teams.find((t) => t.id === editForm.assignedTeam);
     updateMaintenancePlan(selectedPlan.id, {
       plannedStartDate: editForm.plannedStartDate,
       plannedEndDate: editForm.plannedEndDate,
       level: editForm.level,
       assignedTeam: editForm.assignedTeam || undefined,
     });
-    setShowDetailModal(false);
-    setSelectedPlan(null);
+    setSelectedPlan({
+      ...selectedPlan,
+      plannedStartDate: editForm.plannedStartDate,
+      plannedEndDate: editForm.plannedEndDate,
+      level: editForm.level,
+      assignedTeam: editForm.assignedTeam || undefined,
+    });
     setShowSuccess('检修计划更新成功！');
     setTimeout(() => setShowSuccess(''), 3000);
+  };
+
+  const getTeamName = (teamId: string | undefined) => {
+    if (!teamId) return '未分配';
+    return teams.find((t) => t.id === teamId)?.name || '未分配';
   };
 
   return (
@@ -327,98 +389,180 @@ export default function CalendarPage() {
 
       {showImportModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-40">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-md mx-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-3xl mx-4 max-h-[90vh] flex flex-col">
             <div className="flex items-center justify-between p-4 border-b border-gray-200">
               <h3 className="text-lg font-semibold text-gray-800 flex items-center gap-2">
                 <Upload className="w-5 h-5 text-blue-600" />
-                导入里程和到期规则
+                批量导入车组里程和到期规则
               </h3>
               <button
-                onClick={() => setShowImportModal(false)}
+                onClick={() => {
+                  setShowImportModal(false);
+                  resetImportForm();
+                }}
                 className="p-1 hover:bg-gray-100 rounded-lg transition-colors"
               >
                 <X className="w-5 h-5 text-gray-500" />
               </button>
             </div>
-            <div className="p-4 space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  选择车组
-                </label>
-                <select
-                  value={importForm.trainId}
-                  onChange={(e) =>
-                    setImportForm({ ...importForm, trainId: e.target.value })
-                  }
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
-                >
-                  <option value="">请选择车组</option>
-                  {trains.map((train) => (
-                    <option key={train.id} value={train.id}>
-                      {train.trainNo} - {train.model}
-                    </option>
-                  ))}
-                </select>
+            <div className="p-4 overflow-y-auto flex-1">
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4">
+                <div className="flex items-start gap-2">
+                  <Info className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" />
+                  <div className="text-sm text-blue-800">
+                    <p className="font-medium">使用说明：</p>
+                    <p>1. 为每个车组填写当前运行里程和一、二级修的到期里程阈值</p>
+                    <p>2. 系统自动判断：达到二级修阈值生成二级修，仅达到一级修阈值生成一级修</p>
+                    <p>3. 未达阈值或数据不完整的车组不会生成计划，但不影响其他车组</p>
+                  </div>
+                </div>
               </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  运行里程 (公里)
-                </label>
-                <input
-                  type="number"
-                  value={importForm.mileage}
-                  onChange={(e) =>
-                    setImportForm({ ...importForm, mileage: e.target.value })
-                  }
-                  placeholder="请输入当前运行里程"
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
-                />
+
+              <div className="space-y-3">
+                {importItems.map((item, index) => (
+                  <div
+                    key={item.id}
+                    className="border border-gray-200 rounded-lg p-4 bg-gray-50"
+                  >
+                    <div className="flex items-center justify-between mb-3">
+                      <span className="font-medium text-gray-700">车组 {index + 1}</span>
+                      {importItems.length > 1 && (
+                        <button
+                          onClick={() => removeImportItem(item.id)}
+                          className="text-red-500 hover:text-red-700 p-1 hover:bg-red-50 rounded"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      )}
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs font-medium text-gray-600 mb-1">
+                          选择车组 <span className="text-red-500">*</span>
+                        </label>
+                        <select
+                          value={item.trainId}
+                          onChange={(e) =>
+                            updateImportItem(item.id, 'trainId', e.target.value)
+                          }
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                        >
+                          <option value="">请选择车组</option>
+                          {trains.map((train) => (
+                            <option key={train.id} value={train.id}>
+                              {train.trainNo} - {train.model}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-gray-600 mb-1">
+                          当前里程 (公里) <span className="text-red-500">*</span>
+                        </label>
+                        <input
+                          type="number"
+                          value={item.mileage}
+                          onChange={(e) =>
+                            updateImportItem(item.id, 'mileage', e.target.value)
+                          }
+                          placeholder="如：4500"
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-gray-600 mb-1">
+                          一级修阈值 (公里)
+                        </label>
+                        <input
+                          type="number"
+                          value={item.level1Threshold}
+                          onChange={(e) =>
+                            updateImportItem(item.id, 'level1Threshold', e.target.value)
+                          }
+                          placeholder="默认：4000"
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-gray-600 mb-1">
+                          二级修阈值 (公里)
+                        </label>
+                        <input
+                          type="number"
+                          value={item.level2Threshold}
+                          onChange={(e) =>
+                            updateImportItem(item.id, 'level2Threshold', e.target.value)
+                          }
+                          placeholder="默认：8000"
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                ))}
               </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  检修等级
-                </label>
-                <select
-                  value={importForm.level}
-                  onChange={(e) =>
-                    setImportForm({
-                      ...importForm,
-                      level: e.target.value as 'level1' | 'level2',
-                    })
-                  }
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
-                >
-                  <option value="level1">一级修</option>
-                  <option value="level2">二级修</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  建议日期
-                </label>
-                <input
-                  type="date"
-                  value={importForm.suggestedDate}
-                  onChange={(e) =>
-                    setImportForm({ ...importForm, suggestedDate: e.target.value })
-                  }
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
-                />
-              </div>
+
+              <button
+                onClick={addImportItem}
+                className="w-full mt-4 py-2 border-2 border-dashed border-gray-300 rounded-lg text-gray-600 hover:border-blue-500 hover:text-blue-600 transition-colors flex items-center justify-center gap-2"
+              >
+                <Plus className="w-4 h-4" />
+                添加车组
+              </button>
+
+              {importResult && (
+                <div className="mt-4 space-y-3">
+                  {importResult.success.length > 0 && (
+                    <div className="bg-green-50 border border-green-200 rounded-lg p-3">
+                      <div className="font-medium text-green-800 mb-2 flex items-center gap-2">
+                        <CheckCircle className="w-4 h-4" />
+                        成功生成 {importResult.success.length} 条计划：
+                      </div>
+                      <ul className="text-sm text-green-700 space-y-1">
+                        {importResult.success.map((s, i) => (
+                          <li key={i}>✓ {s}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                  {importResult.failed.length > 0 && (
+                    <div className="bg-red-50 border border-red-200 rounded-lg p-3">
+                      <div className="font-medium text-red-800 mb-2 flex items-center gap-2">
+                        <AlertTriangle className="w-4 h-4" />
+                        {importResult.failed.length} 条数据未生成计划：
+                      </div>
+                      <ul className="text-sm text-red-700 space-y-1">
+                        {importResult.failed.map((f, i) => (
+                          <li key={i}>✗ {f.trainNo}: {f.reason}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
             <div className="flex justify-end gap-3 p-4 border-t border-gray-200">
               <button
-                onClick={() => setShowImportModal(false)}
+                onClick={resetImportForm}
                 className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
               >
-                取消
+                重置表单
+              </button>
+              <button
+                onClick={() => {
+                  setShowImportModal(false);
+                  resetImportForm();
+                }}
+                className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+              >
+                关闭
               </button>
               <button
                 onClick={handleImportSubmit}
                 className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2"
               >
                 <Save className="w-4 h-4" />
-                生成检修计划
+                批量生成检修计划
               </button>
             </div>
           </div>
@@ -427,7 +571,7 @@ export default function CalendarPage() {
 
       {showDetailModal && selectedPlan && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-40">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-md mx-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-lg mx-4">
             <div className="flex items-center justify-between p-4 border-b border-gray-200">
               <h3 className="text-lg font-semibold text-gray-800 flex items-center gap-2">
                 <Edit className="w-5 h-5 text-blue-600" />
@@ -473,6 +617,37 @@ export default function CalendarPage() {
                         : selectedPlan.status === 'completed'
                         ? '已完成'
                         : '已超期'}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-gray-500">当前检修等级：</span>
+                    <span
+                      className={cn(
+                        'font-medium',
+                        selectedPlan.level === 'level1'
+                          ? 'text-blue-600'
+                          : 'text-purple-600'
+                      )}
+                    >
+                      {selectedPlan.level === 'level1' ? '一级修' : '二级修'}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-gray-500">当前负责班组：</span>
+                    <span className="font-medium text-gray-800">
+                      {getTeamName(selectedPlan.assignedTeam)}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-gray-500">开始日期：</span>
+                    <span className="font-medium text-gray-800">
+                      {selectedPlan.plannedStartDate}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-gray-500">结束日期：</span>
+                    <span className="font-medium text-gray-800">
+                      {selectedPlan.plannedEndDate}
                     </span>
                   </div>
                 </div>

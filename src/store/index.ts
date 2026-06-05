@@ -124,6 +124,7 @@ interface AppState {
   completeTask: (taskId: string) => void;
   updateTeamMemberWorkload: (memberId: string, workloadDelta: number) => void;
   generateMaintenanceSuggestion: (trainId: string, level: 'level1' | 'level2', date: string) => void;
+  batchGenerateSuggestions: (importData: Array<{ trainId: string; mileage: number; level1Threshold: number; level2Threshold: number }>) => { success: string[]; failed: Array<{ trainNo: string; reason: string }> };
 }
 
 export const useAppStore = create<AppState>((set, get) => {
@@ -298,7 +299,9 @@ export const useAppStore = create<AppState>((set, get) => {
       const train = get().trains.find((t) => t.id === trainId);
       if (!train) return;
       const workPackage = get().workPackages.find((wp) => wp.level === level);
-      const newPlan: Omit<MaintenancePlan, 'id'> = {
+      const newPlanId = `plan${Date.now()}`;
+      const newPlan: MaintenancePlan = {
+        id: newPlanId,
         trainId,
         trainNo: train.trainNo,
         level,
@@ -307,11 +310,125 @@ export const useAppStore = create<AppState>((set, get) => {
         status: 'planned',
         workPackageId: workPackage?.id || 'wp1',
       };
-      const newPlanWithId = { ...newPlan, id: `plan${Date.now()}` };
+
+      const newTasks: DispatchTask[] = [];
+      if (workPackage) {
+        workPackage.procedures.forEach((proc, idx) => {
+          newTasks.push({
+            id: `task${Date.now()}_${idx}`,
+            planId: newPlanId,
+            procedureId: proc.id,
+            procedureName: proc.name,
+            trainNo: train.trainNo,
+            teamId: '',
+            teamName: '待分配',
+            status: 'pending',
+          });
+        });
+      }
+
       set((state) => ({
-        maintenancePlans: [...state.maintenancePlans, newPlanWithId],
+        maintenancePlans: [...state.maintenancePlans, newPlan],
+        dispatchTasks: [...state.dispatchTasks, ...newTasks],
       }));
-      persist({ maintenancePlans: get().maintenancePlans });
+      persist({ maintenancePlans: get().maintenancePlans, dispatchTasks: get().dispatchTasks });
+    },
+
+    batchGenerateSuggestions: (importData) => {
+      const { trains, workPackages } = get();
+      const success: string[] = [];
+      const failed: Array<{ trainNo: string; reason: string }> = [];
+      const newPlans: MaintenancePlan[] = [];
+      const newTasks: DispatchTask[] = [];
+      let planCounter = 0;
+
+      importData.forEach((item) => {
+        const train = trains.find((t) => t.id === item.trainId);
+        if (!train) {
+          failed.push({ trainNo: '未知', reason: '车组不存在' });
+          return;
+        }
+        if (!item.mileage || item.mileage <= 0) {
+          failed.push({ trainNo: train.trainNo, reason: '里程数据无效' });
+          return;
+        }
+        if (!item.level1Threshold || item.level1Threshold <= 0) {
+          failed.push({ trainNo: train.trainNo, reason: '一级修到期规则无效' });
+          return;
+        }
+        if (!item.level2Threshold || item.level2Threshold <= 0) {
+          failed.push({ trainNo: train.trainNo, reason: '二级修到期规则无效' });
+          return;
+        }
+        if (item.level2Threshold <= item.level1Threshold) {
+          failed.push({ trainNo: train.trainNo, reason: '二级修阈值必须大于一级修阈值' });
+          return;
+        }
+
+        let level: 'level1' | 'level2';
+        let daysToAdd: number;
+
+        if (item.mileage >= item.level2Threshold) {
+          level = 'level2';
+          const remaining = item.mileage - item.level2Threshold;
+          daysToAdd = Math.min(Math.ceil(remaining / 1000), 3);
+        } else if (item.mileage >= item.level1Threshold) {
+          level = 'level1';
+          const remaining = item.mileage - item.level1Threshold;
+          daysToAdd = Math.min(Math.ceil(remaining / 500), 2);
+        } else {
+          failed.push({ trainNo: train.trainNo, reason: '里程未达到任何检修阈值' });
+          return;
+        }
+
+        const today = new Date();
+        today.setDate(today.getDate() + daysToAdd);
+        const suggestedDate = today.toISOString().split('T')[0];
+
+        const workPackage = workPackages.find((wp) => wp.level === level);
+        const planId = `plan${Date.now()}_${planCounter++}`;
+
+        newPlans.push({
+          id: planId,
+          trainId: item.trainId,
+          trainNo: train.trainNo,
+          level,
+          plannedStartDate: suggestedDate,
+          plannedEndDate: suggestedDate,
+          status: 'planned',
+          workPackageId: workPackage?.id || 'wp1',
+        });
+
+        if (workPackage) {
+          workPackage.procedures.forEach((proc, idx) => {
+            newTasks.push({
+              id: `task${Date.now()}_${planCounter}_${idx}`,
+              planId,
+              procedureId: proc.id,
+              procedureName: proc.name,
+              trainNo: train.trainNo,
+              teamId: '',
+              teamName: '待分配',
+              status: 'pending',
+            });
+          });
+        }
+
+        success.push(`${train.trainNo} - ${level === 'level1' ? '一级修' : '二级修'}（建议${suggestedDate}）`);
+      });
+
+      if (newPlans.length > 0) {
+        set((state) => ({
+          maintenancePlans: [...state.maintenancePlans, ...newPlans],
+          dispatchTasks: [...state.dispatchTasks, ...newTasks],
+        }));
+        persist({
+          maintenancePlans: get().maintenancePlans,
+          dispatchTasks: get().dispatchTasks,
+        });
+      }
+
+      return { success, failed };
     },
   };
 });

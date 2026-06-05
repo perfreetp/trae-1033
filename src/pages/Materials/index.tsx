@@ -8,13 +8,15 @@ import {
   ClipboardList,
   Filter,
   X,
+  BarChart3,
+  TrendingUp,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { useAppStore } from '@/store';
 import { cn } from '@/lib/utils';
 import type { Material, MaterialUsage } from '@/types';
 
-type TabType = 'stock' | 'receive' | 'records';
+type TabType = 'stock' | 'receive' | 'records' | 'stats';
 
 export default function Materials() {
   const { materials, materialUsages, addMaterialUsage, maintenancePlans, dispatchTasks, teamMembers } = useAppStore();
@@ -59,6 +61,52 @@ export default function Materials() {
   const selectedMaterial = useMemo(() => {
     return materials.find((m) => m.id === selectedMaterialId) || null;
   }, [materials, selectedMaterialId]);
+
+  const consumptionStats = useMemo(() => {
+    const stats: Record<string, {
+      materialName: string;
+      partNo: string;
+      category: string;
+      totalQuantity: number;
+      usageCount: number;
+      trainNos: string[];
+      receivers: string[];
+      lastUsedTime: string;
+    }> = {};
+
+    materialUsages.forEach((usage) => {
+      if (!stats[usage.materialId]) {
+        stats[usage.materialId] = {
+          materialName: usage.materialName,
+          partNo: '',
+          category: '',
+          totalQuantity: 0,
+          usageCount: 0,
+          trainNos: [],
+          receivers: [],
+          lastUsedTime: '',
+        };
+      }
+      const material = materials.find((m) => m.id === usage.materialId);
+      if (material) {
+        stats[usage.materialId].partNo = material.partNo;
+        stats[usage.materialId].category = material.category;
+      }
+      stats[usage.materialId].totalQuantity += usage.quantity;
+      stats[usage.materialId].usageCount += 1;
+      if (!stats[usage.materialId].trainNos.includes(usage.trainNo)) {
+        stats[usage.materialId].trainNos.push(usage.trainNo);
+      }
+      if (!stats[usage.materialId].receivers.includes(usage.receiver)) {
+        stats[usage.materialId].receivers.push(usage.receiver);
+      }
+      if (usage.receiveTime > stats[usage.materialId].lastUsedTime) {
+        stats[usage.materialId].lastUsedTime = usage.receiveTime;
+      }
+    });
+
+    return Object.values(stats).sort((a, b) => b.totalQuantity - a.totalQuantity);
+  }, [materialUsages, materials]);
 
   const availableTasks = useMemo(() => {
     return dispatchTasks.filter((t) => t.status === 'in_progress' || t.status === 'assigned');
@@ -135,6 +183,7 @@ export default function Materials() {
     { key: 'stock' as TabType, label: '库存列表', icon: Package },
     { key: 'receive' as TabType, label: '领用登记', icon: Plus },
     { key: 'records' as TabType, label: '领用记录', icon: ClipboardList },
+    { key: 'stats' as TabType, label: '消耗统计', icon: BarChart3 },
   ];
 
   return (
@@ -424,6 +473,92 @@ export default function Materials() {
                   <p className="text-sm">暂无领用记录</p>
                 </div>
               )}
+            </div>
+          )}
+
+          {activeTab === 'stats' && (
+            <div className="space-y-6">
+              <div className="grid grid-cols-4 gap-4">
+                <div className="bg-blue-50 rounded-lg p-4 border border-blue-200">
+                  <p className="text-xs text-blue-600 mb-1">累计领用配件种类</p>
+                  <p className="text-2xl font-bold text-blue-700">{consumptionStats.length}</p>
+                </div>
+                <div className="bg-green-50 rounded-lg p-4 border border-green-200">
+                  <p className="text-xs text-green-600 mb-1">累计领用数量</p>
+                  <p className="text-2xl font-bold text-green-700">
+                    {consumptionStats.reduce((sum, s) => sum + s.totalQuantity, 0)}
+                  </p>
+                </div>
+                <div className="bg-purple-50 rounded-lg p-4 border border-purple-200">
+                  <p className="text-xs text-purple-600 mb-1">累计领用次数</p>
+                  <p className="text-2xl font-bold text-purple-700">
+                    {consumptionStats.reduce((sum, s) => sum + s.usageCount, 0)}
+                  </p>
+                </div>
+                <div className="bg-amber-50 rounded-lg p-4 border border-amber-200">
+                  <p className="text-xs text-amber-600 mb-1">关联车组数量</p>
+                  <p className="text-2xl font-bold text-amber-700">
+                    {new Set(consumptionStats.flatMap((s) => s.trainNos)).size}
+                  </p>
+                </div>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead>
+                    <tr className="border-b border-neutral-200">
+                      <th className="text-left py-3 px-4 text-sm font-medium text-neutral-500">配件名称</th>
+                      <th className="text-left py-3 px-4 text-sm font-medium text-neutral-500">配件编号</th>
+                      <th className="text-left py-3 px-4 text-sm font-medium text-neutral-500">分类</th>
+                      <th className="text-left py-3 px-4 text-sm font-medium text-neutral-500">累计消耗</th>
+                      <th className="text-left py-3 px-4 text-sm font-medium text-neutral-500">领用次数</th>
+                      <th className="text-left py-3 px-4 text-sm font-medium text-neutral-500">关联车组</th>
+                      <th className="text-left py-3 px-4 text-sm font-medium text-neutral-500">最近使用</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-neutral-100">
+                    {consumptionStats.length > 0 ? (
+                      consumptionStats.map((stat) => (
+                        <tr key={stat.partNo} className="hover:bg-neutral-50">
+                          <td className="py-3 px-4">
+                            <span className="font-medium text-neutral-900">{stat.materialName}</span>
+                          </td>
+                          <td className="py-3 px-4 text-neutral-600">{stat.partNo}</td>
+                          <td className="py-3 px-4 text-neutral-600">{stat.category}</td>
+                          <td className="py-3 px-4">
+                            <span className="font-semibold text-blue-600">{stat.totalQuantity}</span>
+                          </td>
+                          <td className="py-3 px-4 text-neutral-600">{stat.usageCount} 次</td>
+                          <td className="py-3 px-4 text-neutral-600">
+                            <div className="flex flex-wrap gap-1">
+                              {stat.trainNos.slice(0, 3).map((t) => (
+                                <span key={t} className="text-xs bg-gray-100 px-2 py-0.5 rounded">
+                                  {t}
+                                </span>
+                              ))}
+                              {stat.trainNos.length > 3 && (
+                                <span className="text-xs text-gray-500">+{stat.trainNos.length - 3}</span>
+                              )}
+                            </div>
+                          </td>
+                          <td className="py-3 px-4 text-neutral-600 text-sm">
+                            {stat.lastUsedTime
+                              ? format(new Date(stat.lastUsedTime), 'yyyy-MM-dd HH:mm')
+                              : '-'}
+                          </td>
+                        </tr>
+                      ))
+                    ) : (
+                      <tr>
+                        <td colSpan={7} className="py-12 text-center">
+                          <BarChart3 className="w-12 h-12 mx-auto mb-2 text-neutral-300" />
+                          <p className="text-sm text-neutral-500">暂无消耗统计数据</p>
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
             </div>
           )}
         </div>
