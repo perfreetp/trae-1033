@@ -366,7 +366,8 @@ export const qualityInspections: QualityInspection[] = [
     inspector: '质检员-王',
     inspectionTime: '2026-06-06T08:50:00',
     result: 'pass',
-    remarks: '外观检查合格，划痕已记录',
+    reinspectionOpinion: '外观检查合格，划痕已记录，符合检修标准',
+    releaseRemarks: '各项指标合格，准予放行',
     releaseConclusion: 'released',
   },
 ];

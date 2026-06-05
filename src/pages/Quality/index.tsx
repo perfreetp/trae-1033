@@ -115,12 +115,14 @@ export default function Quality() {
       inspector: inspectorName,
       inspectionTime: new Date().toISOString(),
       result: releaseConclusion === 'released' ? 'pass' : 'rework',
-      remarks: reinspectionOpinion,
+      reinspectionOpinion: reinspectionOpinion,
+      releaseRemarks: finalRemarks || undefined,
       reworkRequired: releaseConclusion === 'held',
       releaseConclusion: releaseConclusion || undefined,
     })
     setReinspectionOpinion('')
     setInspectorName('')
+    setFinalRemarks('')
   }
 
   const goToNextStep = () => {
@@ -703,7 +705,7 @@ export default function Quality() {
                   <div className="space-y-3">
                     {taskInspections.map((inspection) => (
                       <div key={inspection.id} className="bg-white rounded-lg border border-gray-200 p-4">
-                        <div className="flex items-start justify-between mb-2">
+                        <div className="flex items-start justify-between mb-3">
                           <span
                             className={cn(
                               'px-2 py-0.5 rounded-full text-xs font-medium',
@@ -718,11 +720,20 @@ export default function Quality() {
                             {new Date(inspection.inspectionTime).toLocaleString('zh-CN')}
                           </span>
                         </div>
-                        <div className="text-sm font-medium text-gray-800 mb-1">
+                        <div className="text-sm font-medium text-gray-800 mb-2">
                           质检员：{inspection.inspector}
                         </div>
-                        {inspection.remarks && (
-                          <p className="text-sm text-gray-600">{inspection.remarks}</p>
+                        {inspection.reinspectionOpinion && (
+                          <div className="mb-2 p-3 rounded-lg bg-blue-50 border border-blue-100">
+                            <div className="text-xs font-medium text-blue-700 mb-1">复检意见</div>
+                            <p className="text-sm text-blue-800">{inspection.reinspectionOpinion}</p>
+                          </div>
+                        )}
+                        {inspection.releaseRemarks && (
+                          <div className="p-3 rounded-lg bg-gray-50 border border-gray-200">
+                            <div className="text-xs font-medium text-gray-600 mb-1">放行备注</div>
+                            <p className="text-sm text-gray-700">{inspection.releaseRemarks}</p>
+                          </div>
                         )}
                       </div>
                     ))}

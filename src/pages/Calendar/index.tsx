@@ -12,14 +12,51 @@ import {
   startOfDay,
   isToday,
 } from 'date-fns';
-import { ChevronLeft, ChevronRight, AlertTriangle, Wrench, Lightbulb } from 'lucide-react';
+import {
+  ChevronLeft,
+  ChevronRight,
+  AlertTriangle,
+  Wrench,
+  Lightbulb,
+  Upload,
+  X,
+  Edit,
+  Save,
+  CheckCircle,
+} from 'lucide-react';
 import { useAppStore } from '../../store';
 import type { MaintenancePlan } from '../../types';
 import { cn } from '../../lib/utils';
 
 export default function CalendarPage() {
-  const { maintenancePlans, trains } = useAppStore();
+  const {
+    maintenancePlans,
+    trains,
+    teams,
+    generateMaintenanceSuggestion,
+    updateMaintenancePlan,
+  } = useAppStore();
+
   const [currentMonth, setCurrentMonth] = useState(new Date());
+
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [importForm, setImportForm] = useState({
+    trainId: '',
+    mileage: '',
+    level: 'level1' as 'level1' | 'level2',
+    suggestedDate: format(new Date(), 'yyyy-MM-dd'),
+  });
+
+  const [showDetailModal, setShowDetailModal] = useState(false);
+  const [selectedPlan, setSelectedPlan] = useState<MaintenancePlan | null>(null);
+  const [editForm, setEditForm] = useState({
+    plannedStartDate: '',
+    plannedEndDate: '',
+    level: 'level1' as 'level1' | 'level2',
+    assignedTeam: '',
+  });
+
+  const [showSuccess, setShowSuccess] = useState('');
 
   const monthStart = startOfMonth(currentMonth);
   const monthEnd = endOfMonth(currentMonth);
@@ -83,11 +120,71 @@ export default function CalendarPage() {
 
   const weekDays = ['日', '一', '二', '三', '四', '五', '六'];
 
+  const handleImportSubmit = () => {
+    if (!importForm.trainId) {
+      alert('请选择车组');
+      return;
+    }
+    generateMaintenanceSuggestion(
+      importForm.trainId,
+      importForm.level,
+      importForm.suggestedDate
+    );
+    setShowImportModal(false);
+    setImportForm({
+      trainId: '',
+      mileage: '',
+      level: 'level1',
+      suggestedDate: format(new Date(), 'yyyy-MM-dd'),
+    });
+    setShowSuccess('检修计划生成成功！');
+    setTimeout(() => setShowSuccess(''), 3000);
+  };
+
+  const handlePlanClick = (plan: MaintenancePlan) => {
+    setSelectedPlan(plan);
+    setEditForm({
+      plannedStartDate: plan.plannedStartDate,
+      plannedEndDate: plan.plannedEndDate,
+      level: plan.level,
+      assignedTeam: plan.assignedTeam || '',
+    });
+    setShowDetailModal(true);
+  };
+
+  const handleEditSubmit = () => {
+    if (!selectedPlan) return;
+    updateMaintenancePlan(selectedPlan.id, {
+      plannedStartDate: editForm.plannedStartDate,
+      plannedEndDate: editForm.plannedEndDate,
+      level: editForm.level,
+      assignedTeam: editForm.assignedTeam || undefined,
+    });
+    setShowDetailModal(false);
+    setSelectedPlan(null);
+    setShowSuccess('检修计划更新成功！');
+    setTimeout(() => setShowSuccess(''), 3000);
+  };
+
   return (
-    <div className="p-6 space-y-6">
+    <div className="p-6 space-y-6 relative">
+      {showSuccess && (
+        <div className="fixed top-4 right-4 z-50 bg-green-500 text-white px-6 py-3 rounded-lg shadow-lg flex items-center gap-2 animate-pulse">
+          <CheckCircle className="w-5 h-5" />
+          <span>{showSuccess}</span>
+        </div>
+      )}
+
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold text-gray-900">检修日历</h1>
         <div className="flex items-center gap-4">
+          <button
+            onClick={() => setShowImportModal(true)}
+            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+          >
+            <Upload className="w-4 h-4" />
+            导入数据
+          </button>
           <div className="flex items-center gap-2">
             <div className="w-3 h-3 rounded-full bg-blue-500"></div>
             <span className="text-sm text-gray-600">一级修</span>
@@ -167,6 +264,7 @@ export default function CalendarPage() {
                   {plans.slice(0, 2).map((plan) => (
                     <div
                       key={plan.id}
+                      onClick={() => handlePlanClick(plan)}
                       className={cn(
                         'text-xs px-2 py-1 rounded truncate text-white cursor-pointer hover:opacity-90',
                         getPlanColor(plan)
@@ -223,6 +321,245 @@ export default function CalendarPage() {
                 </div>
               </div>
             ))}
+          </div>
+        </div>
+      )}
+
+      {showImportModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-40">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-md mx-4">
+            <div className="flex items-center justify-between p-4 border-b border-gray-200">
+              <h3 className="text-lg font-semibold text-gray-800 flex items-center gap-2">
+                <Upload className="w-5 h-5 text-blue-600" />
+                导入里程和到期规则
+              </h3>
+              <button
+                onClick={() => setShowImportModal(false)}
+                className="p-1 hover:bg-gray-100 rounded-lg transition-colors"
+              >
+                <X className="w-5 h-5 text-gray-500" />
+              </button>
+            </div>
+            <div className="p-4 space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  选择车组
+                </label>
+                <select
+                  value={importForm.trainId}
+                  onChange={(e) =>
+                    setImportForm({ ...importForm, trainId: e.target.value })
+                  }
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                >
+                  <option value="">请选择车组</option>
+                  {trains.map((train) => (
+                    <option key={train.id} value={train.id}>
+                      {train.trainNo} - {train.model}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  运行里程 (公里)
+                </label>
+                <input
+                  type="number"
+                  value={importForm.mileage}
+                  onChange={(e) =>
+                    setImportForm({ ...importForm, mileage: e.target.value })
+                  }
+                  placeholder="请输入当前运行里程"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  检修等级
+                </label>
+                <select
+                  value={importForm.level}
+                  onChange={(e) =>
+                    setImportForm({
+                      ...importForm,
+                      level: e.target.value as 'level1' | 'level2',
+                    })
+                  }
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                >
+                  <option value="level1">一级修</option>
+                  <option value="level2">二级修</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  建议日期
+                </label>
+                <input
+                  type="date"
+                  value={importForm.suggestedDate}
+                  onChange={(e) =>
+                    setImportForm({ ...importForm, suggestedDate: e.target.value })
+                  }
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                />
+              </div>
+            </div>
+            <div className="flex justify-end gap-3 p-4 border-t border-gray-200">
+              <button
+                onClick={() => setShowImportModal(false)}
+                className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+              >
+                取消
+              </button>
+              <button
+                onClick={handleImportSubmit}
+                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2"
+              >
+                <Save className="w-4 h-4" />
+                生成检修计划
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showDetailModal && selectedPlan && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-40">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-md mx-4">
+            <div className="flex items-center justify-between p-4 border-b border-gray-200">
+              <h3 className="text-lg font-semibold text-gray-800 flex items-center gap-2">
+                <Edit className="w-5 h-5 text-blue-600" />
+                检修计划详情
+              </h3>
+              <button
+                onClick={() => {
+                  setShowDetailModal(false);
+                  setSelectedPlan(null);
+                }}
+                className="p-1 hover:bg-gray-100 rounded-lg transition-colors"
+              >
+                <X className="w-5 h-5 text-gray-500" />
+              </button>
+            </div>
+            <div className="p-4 space-y-4">
+              <div className="bg-gray-50 p-3 rounded-lg">
+                <div className="grid grid-cols-2 gap-4 text-sm">
+                  <div>
+                    <span className="text-gray-500">车组号：</span>
+                    <span className="font-medium text-gray-800">
+                      {selectedPlan.trainNo}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-gray-500">计划状态：</span>
+                    <span
+                      className={cn(
+                        'font-medium',
+                        selectedPlan.status === 'completed'
+                          ? 'text-green-600'
+                          : selectedPlan.status === 'in_progress'
+                          ? 'text-blue-600'
+                          : selectedPlan.status === 'overdue'
+                          ? 'text-red-600'
+                          : 'text-gray-800'
+                      )}
+                    >
+                      {selectedPlan.status === 'planned'
+                        ? '已计划'
+                        : selectedPlan.status === 'in_progress'
+                        ? '进行中'
+                        : selectedPlan.status === 'completed'
+                        ? '已完成'
+                        : '已超期'}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  开始日期
+                </label>
+                <input
+                  type="date"
+                  value={editForm.plannedStartDate}
+                  onChange={(e) =>
+                    setEditForm({ ...editForm, plannedStartDate: e.target.value })
+                  }
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  结束日期
+                </label>
+                <input
+                  type="date"
+                  value={editForm.plannedEndDate}
+                  onChange={(e) =>
+                    setEditForm({ ...editForm, plannedEndDate: e.target.value })
+                  }
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  检修等级
+                </label>
+                <select
+                  value={editForm.level}
+                  onChange={(e) =>
+                    setEditForm({
+                      ...editForm,
+                      level: e.target.value as 'level1' | 'level2',
+                    })
+                  }
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                >
+                  <option value="level1">一级修</option>
+                  <option value="level2">二级修</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  负责班组
+                </label>
+                <select
+                  value={editForm.assignedTeam}
+                  onChange={(e) =>
+                    setEditForm({ ...editForm, assignedTeam: e.target.value })
+                  }
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                >
+                  <option value="">请选择班组</option>
+                  {teams.map((team) => (
+                    <option key={team.id} value={team.id}>
+                      {team.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <div className="flex justify-end gap-3 p-4 border-t border-gray-200">
+              <button
+                onClick={() => {
+                  setShowDetailModal(false);
+                  setSelectedPlan(null);
+                }}
+                className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+              >
+                取消
+              </button>
+              <button
+                onClick={handleEditSubmit}
+                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2"
+              >
+                <Save className="w-4 h-4" />
+                保存修改
+              </button>
+            </div>
           </div>
         </div>
       )}

@@ -27,6 +27,7 @@ export default function Materials() {
   const [receiver, setReceiver] = useState<string>('');
   const [taskId, setTaskId] = useState<string>('');
   const [recordSearchQuery, setRecordSearchQuery] = useState('');
+  const [errorMessage, setErrorMessage] = useState<string>('');
 
   const categories = useMemo(() => {
     const cats = new Set(materials.map((m) => m.category));
@@ -85,14 +86,18 @@ export default function Materials() {
 
     const qty = parseInt(receiveQuantity);
     if (isNaN(qty) || qty <= 0) return;
-    if (selectedMaterial && qty > selectedMaterial.stockQuantity) return;
+
+    if (selectedMaterial && qty > selectedMaterial.stockQuantity) {
+      setErrorMessage(`库存不足，当前库存${selectedMaterial.stockQuantity}${selectedMaterial.unit}，您要领用${qty}${selectedMaterial.unit}`);
+      return;
+    }
 
     const task = dispatchTasks.find((t) => t.id === taskId);
     if (!task) return;
 
     const plan = maintenancePlans.find((p) => p.id === task.planId);
 
-    addMaterialUsage({
+    const success = addMaterialUsage({
       materialId: selectedMaterialId,
       materialName: selectedMaterial?.name || '',
       taskId: taskId,
@@ -103,6 +108,16 @@ export default function Materials() {
       receiveTime: new Date().toISOString(),
     });
 
+    if (!success) {
+      if (selectedMaterial) {
+        setErrorMessage(`库存不足，当前库存${selectedMaterial.stockQuantity}${selectedMaterial.unit}，您要领用${qty}${selectedMaterial.unit}`);
+      } else {
+        setErrorMessage('领用失败，请重试');
+      }
+      return;
+    }
+
+    setErrorMessage('');
     setShowReceiveForm(false);
     setSelectedMaterialId('');
     setReceiveQuantity('1');
@@ -112,6 +127,7 @@ export default function Materials() {
 
   const openReceiveForm = (materialId: string) => {
     setSelectedMaterialId(materialId);
+    setErrorMessage('');
     setShowReceiveForm(true);
   };
 
@@ -258,6 +274,14 @@ export default function Materials() {
           {activeTab === 'receive' && (
             <div className="max-w-2xl mx-auto">
               <h3 className="text-lg font-semibold text-neutral-900 mb-6">领用登记</h3>
+              {errorMessage && (
+                <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-md">
+                  <p className="text-sm text-red-600 flex items-center gap-2">
+                    <AlertTriangle className="w-4 h-4" />
+                    {errorMessage}
+                  </p>
+                </div>
+              )}
               <div className="space-y-6">
                 <div>
                   <label className="block text-sm font-medium text-neutral-700 mb-2">选择配件</label>
@@ -418,6 +442,14 @@ export default function Materials() {
               </button>
             </div>
             <div className="p-4 space-y-4">
+              {errorMessage && (
+                <div className="p-3 bg-red-50 border border-red-200 rounded-md">
+                  <p className="text-sm text-red-600 flex items-center gap-2">
+                    <AlertTriangle className="w-4 h-4" />
+                    {errorMessage}
+                  </p>
+                </div>
+              )}
               <div>
                 <label className="block text-sm font-medium text-neutral-700 mb-2">领用数量</label>
                 <input

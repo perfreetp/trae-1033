@@ -81,6 +81,7 @@ export interface FaultRecord {
   handleTime: string;
 }
 
+// 质量验收
 export interface QualityInspection {
   id: string;
   taskId: string;
@@ -88,7 +89,8 @@ export interface QualityInspection {
   inspector: string;
   inspectionTime: string;
   result: 'pass' | 'fail' | 'rework';
-  remarks?: string;
+  reinspectionOpinion?: string;
+  releaseRemarks?: string;
   reworkRequired?: boolean;
   releaseConclusion?: 'released' | 'held';
 }

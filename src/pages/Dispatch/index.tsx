@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react';
 import { useAppStore } from '../../store';
 import { DispatchTask, TeamMember } from '../../types';
-import { User, Train, Clock, CheckCircle, AlertCircle, Play, Users, Filter } from 'lucide-react';
+import { User, Train, Clock, CheckCircle, AlertCircle, Play, Users, Filter, X, Send } from 'lucide-react';
 import { clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 
@@ -17,13 +17,7 @@ const statusConfig = {
   rework: { label: '返工', color: 'bg-red-50 text-red-700 border-red-200', dotColor: 'bg-red-500' },
 };
 
-const teams = [
-  { id: 'all', name: '全部班组' },
-  { id: 't1', name: '机电一班' },
-  { id: 't2', name: '机电二班' },
-  { id: 't3', name: '综合一班' },
-  { id: 't4', name: '综合二班' },
-];
+
 
 const displayStatuses: Array<'pending' | 'assigned' | 'in_progress' | 'completed'> = [
   'pending',
@@ -32,7 +26,7 @@ const displayStatuses: Array<'pending' | 'assigned' | 'in_progress' | 'completed
   'completed',
 ];
 
-function TaskCard({ task }: { task: DispatchTask }) {
+function TaskCard({ task, onAssign }: { task: DispatchTask; onAssign?: (taskId: string) => void }) {
   const config = statusConfig[task.status];
   const startTask = useAppStore((state) => state.startTask);
   const completeTask = useAppStore((state) => state.completeTask);
@@ -46,6 +40,12 @@ function TaskCard({ task }: { task: DispatchTask }) {
   const handleComplete = () => {
     if (task.status === 'in_progress') {
       completeTask(task.id);
+    }
+  };
+
+  const handleAssign = () => {
+    if (task.status === 'pending' && onAssign) {
+      onAssign(task.id);
     }
   };
 
@@ -76,6 +76,16 @@ function TaskCard({ task }: { task: DispatchTask }) {
         <User className="w-3.5 h-3.5" />
         <span>{task.assigneeName || '未分配'}</span>
       </div>
+
+      {task.status === 'pending' && (
+        <button
+          onClick={handleAssign}
+          className="w-full flex items-center justify-center gap-2 py-2 px-3 bg-blue-500 hover:bg-blue-600 text-white text-xs font-medium rounded-md transition-colors"
+        >
+          <Send className="w-3.5 h-3.5" />
+          派工
+        </button>
+      )}
 
       {task.status === 'assigned' && (
         <button
@@ -161,8 +171,15 @@ function WorkloadBar({ member }: { member: TeamMember }) {
 
 export default function DispatchBoard() {
   const [selectedTeam, setSelectedTeam] = useState<string>('all');
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [assignTeamId, setAssignTeamId] = useState<string>('');
+  const [assignMemberId, setAssignMemberId] = useState<string>('');
+  
   const dispatchTasks = useAppStore((state) => state.dispatchTasks);
   const teamMembers = useAppStore((state) => state.teamMembers);
+  const teams = useAppStore((state) => state.teams);
+  const assignTask = useAppStore((state) => state.assignTask);
 
   const filteredTasks = useMemo(() => {
     if (selectedTeam === 'all') return dispatchTasks;
@@ -200,6 +217,42 @@ export default function DispatchBoard() {
     return Math.round(total / filteredMembers.length);
   }, [filteredMembers]);
 
+  const teamsWithAll = useMemo(() => [
+    { id: 'all', name: '全部班组' },
+    ...teams
+  ], [teams]);
+
+  const assignableMembers = useMemo(() => {
+    if (!assignTeamId) return [];
+    return teamMembers.filter(m => m.teamId === assignTeamId);
+  }, [teamMembers, assignTeamId]);
+
+  const handleOpenAssignModal = (taskId: string) => {
+    setSelectedTaskId(taskId);
+    setAssignTeamId('');
+    setAssignMemberId('');
+    setIsModalOpen(true);
+  };
+
+  const handleCloseModal = () => {
+    setIsModalOpen(false);
+    setSelectedTaskId(null);
+    setAssignTeamId('');
+    setAssignMemberId('');
+  };
+
+  const handleConfirmAssign = () => {
+    if (!selectedTaskId || !assignTeamId || !assignMemberId) return;
+    
+    const team = teams.find(t => t.id === assignTeamId);
+    const member = teamMembers.find(m => m.id === assignMemberId);
+    
+    if (team && member) {
+      assignTask(selectedTaskId, team.id, team.name, member.id, member.name);
+      handleCloseModal();
+    }
+  };
+
   return (
     <div className="h-full flex flex-col bg-gray-50">
       <div className="bg-white border-b border-gray-200 px-6 py-4">
@@ -216,7 +269,7 @@ export default function DispatchBoard() {
                 onChange={(e) => setSelectedTeam(e.target.value)}
                 className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white"
               >
-                {teams.map((team) => (
+                {teamsWithAll.map((team) => (
                   <option key={team.id} value={team.id}>
                     {team.name}
                   </option>
@@ -271,7 +324,7 @@ export default function DispatchBoard() {
                 </div>
                 <div className="flex-1 overflow-auto space-y-3 pr-1">
                   {tasksByStatus[status]?.map((task) => (
-                    <TaskCard key={task.id} task={task} />
+                    <TaskCard key={task.id} task={task} onAssign={handleOpenAssignModal} />
                   ))}
                   {(!tasksByStatus[status] || tasksByStatus[status].length === 0) && (
                     <div className="flex flex-col items-center justify-center py-8 text-gray-400">
@@ -306,6 +359,77 @@ export default function DispatchBoard() {
           </div>
         </div>
       </div>
+
+      {isModalOpen && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-md mx-4">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
+              <h3 className="text-lg font-semibold text-gray-900">派工</h3>
+              <button
+                onClick={handleCloseModal}
+                className="p-1 hover:bg-gray-100 rounded-md transition-colors"
+              >
+                <X className="w-5 h-5 text-gray-500" />
+              </button>
+            </div>
+            <div className="px-6 py-4 space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                  选择班组
+                </label>
+                <select
+                  value={assignTeamId}
+                  onChange={(e) => {
+                    setAssignTeamId(e.target.value);
+                    setAssignMemberId('');
+                  }}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white"
+                >
+                  <option value="">请选择班组</option>
+                  {teams.map((team) => (
+                    <option key={team.id} value={team.id}>
+                      {team.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                  选择人员
+                </label>
+                <select
+                  value={assignMemberId}
+                  onChange={(e) => setAssignMemberId(e.target.value)}
+                  disabled={!assignTeamId}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white disabled:bg-gray-100 disabled:cursor-not-allowed"
+                >
+                  <option value="">请选择人员</option>
+                  {assignableMembers.map((member) => (
+                    <option key={member.id} value={member.id}>
+                      {member.name} ({member.workload}%)
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-gray-200 bg-gray-50 rounded-b-lg">
+              <button
+                onClick={handleCloseModal}
+                className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 transition-colors"
+              >
+                取消
+              </button>
+              <button
+                onClick={handleConfirmAssign}
+                disabled={!assignTeamId || !assignMemberId}
+                className="px-4 py-2 text-sm font-medium text-white bg-blue-500 rounded-md hover:bg-blue-600 transition-colors disabled:bg-gray-300 disabled:cursor-not-allowed"
+              >
+                确认派工
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
