@@ -1,9 +1,10 @@
 import { useState, useMemo } from 'react';
 import { useAppStore } from '../../store';
-import { DispatchTask, TeamMember } from '../../types';
-import { User, Train, Clock, CheckCircle, AlertCircle, Play, Users, Filter, X, Send } from 'lucide-react';
+import { DispatchTask, TeamMember, WorkPackage, Procedure } from '../../types';
+import { User, Train, Clock, CheckCircle, AlertCircle, Play, Users, Filter, X, Send, ArrowLeft, Calendar, FileText } from 'lucide-react';
 import { clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
+import { format } from 'date-fns';
 
 function cn(...inputs: Parameters<typeof clsx>) {
   return twMerge(clsx(inputs));
@@ -171,6 +172,7 @@ function WorkloadBar({ member }: { member: TeamMember }) {
 
 export default function DispatchBoard() {
   const [selectedTeam, setSelectedTeam] = useState<string>('all');
+  const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [assignTeamId, setAssignTeamId] = useState<string>('');
@@ -179,12 +181,44 @@ export default function DispatchBoard() {
   const dispatchTasks = useAppStore((state) => state.dispatchTasks);
   const teamMembers = useAppStore((state) => state.teamMembers);
   const teams = useAppStore((state) => state.teams);
+  const maintenancePlans = useAppStore((state) => state.maintenancePlans);
+  const workPackages = useAppStore((state) => state.workPackages);
   const assignTask = useAppStore((state) => state.assignTask);
 
+  const plansWithTasks = useMemo(() => {
+    const planMap = new Map<string, { plan: typeof maintenancePlans[0]; taskCount: number }>();
+    dispatchTasks.forEach((task) => {
+      const plan = maintenancePlans.find((p) => p.id === task.planId);
+      if (plan) {
+        if (!planMap.has(plan.id)) {
+          planMap.set(plan.id, { plan, taskCount: 0 });
+        }
+        planMap.get(plan.id)!.taskCount++;
+      }
+    });
+    return Array.from(planMap.values());
+  }, [dispatchTasks, maintenancePlans]);
+
+  const selectedPlan = useMemo(() => {
+    if (!selectedPlanId) return null;
+    return maintenancePlans.find((p) => p.id === selectedPlanId) || null;
+  }, [selectedPlanId, maintenancePlans]);
+
+  const selectedWorkPackage = useMemo(() => {
+    if (!selectedPlan) return null;
+    return workPackages.find((wp) => wp.id === selectedPlan.workPackageId) || null;
+  }, [selectedPlan, workPackages]);
+
   const filteredTasks = useMemo(() => {
-    if (selectedTeam === 'all') return dispatchTasks;
-    return dispatchTasks.filter((task) => task.teamId === selectedTeam);
-  }, [dispatchTasks, selectedTeam]);
+    let tasks = dispatchTasks;
+    if (selectedTeam !== 'all') {
+      tasks = tasks.filter((task) => task.teamId === selectedTeam);
+    }
+    if (selectedPlanId) {
+      tasks = tasks.filter((task) => task.planId === selectedPlanId);
+    }
+    return tasks;
+  }, [dispatchTasks, selectedTeam, selectedPlanId]);
 
   const filteredMembers = useMemo(() => {
     if (selectedTeam === 'all') return teamMembers;
@@ -255,13 +289,73 @@ export default function DispatchBoard() {
 
   return (
     <div className="h-full flex flex-col bg-gray-50">
-      <div className="bg-white border-b border-gray-200 px-6 py-4">
+      <div className="bg-white border-b border-gray-200 px-6 py-4 space-y-4">
+        {selectedPlan && (
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => setSelectedPlanId(null)}
+                  className="p-1 hover:bg-blue-100 rounded transition-colors"
+                >
+                  <ArrowLeft className="w-5 h-5 text-blue-600" />
+                </button>
+                <div>
+                  <h3 className="font-semibold text-blue-800 flex items-center gap-2">
+                    <Calendar className="w-4 h-4" />
+                    计划：{selectedPlan.trainNo} - {selectedPlan.level === 'level1' ? '一级修' : '二级修'}
+                  </h3>
+                  <p className="text-sm text-blue-600">
+                    日期：{selectedPlan.plannedStartDate} ~ {selectedPlan.plannedEndDate}
+                    {selectedWorkPackage && ` | 作业包：${selectedWorkPackage.name}（${selectedWorkPackage.estimatedHours}小时）`}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setSelectedPlanId(null)}
+                className="text-sm text-blue-600 hover:text-blue-800"
+              >
+                返回全部任务
+              </button>
+            </div>
+            {selectedWorkPackage && (
+              <div className="mt-3 pt-3 border-t border-blue-200">
+                <p className="text-sm font-medium text-blue-800 mb-2">作业包工序（{selectedWorkPackage.procedures.length}道）：</p>
+                <div className="grid grid-cols-3 gap-2">
+                  {selectedWorkPackage.procedures.map((proc) => (
+                    <div key={proc.id} className="bg-white rounded px-3 py-2 text-sm">
+                      <div className="font-medium text-gray-800">{proc.name}</div>
+                      <div className="text-xs text-gray-500">标准工时：{proc.standardTime}分钟</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-xl font-bold text-gray-900">派工看板</h1>
             <p className="text-sm text-gray-500 mt-1">实时监控任务进度与人员负荷</p>
           </div>
           <div className="flex items-center gap-4">
+            {!selectedPlanId && (
+              <div className="flex items-center gap-2">
+                <Filter className="w-4 h-4 text-gray-500" />
+                <select
+                  value=""
+                  onChange={(e) => e.target.value && setSelectedPlanId(e.target.value)}
+                  className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                >
+                  <option value="">按计划筛选...</option>
+                  {plansWithTasks.map(({ plan, taskCount }) => (
+                    <option key={plan.id} value={plan.id}>
+                      {plan.trainNo} - {plan.level === 'level1' ? '一级修' : '二级修'}（{taskCount}道工序）
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
             <div className="flex items-center gap-2">
               <Filter className="w-4 h-4 text-gray-500" />
               <select

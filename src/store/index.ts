@@ -12,6 +12,7 @@ import {
   MaintenanceRule,
   MaintenanceHistory,
   PartTracking,
+  PlanOperationLog,
 } from '../types';
 import {
   trains as initialTrains,
@@ -67,9 +68,11 @@ const getInitialState = () => {
       maintenanceRules: stored.maintenanceRules || initialRules,
       maintenanceHistories: stored.maintenanceHistories || initialHistories,
       partTrackings: stored.partTrackings || initialParts,
+      planOperationLogs: stored.planOperationLogs || [],
       selectedTrainId: stored.selectedTrainId || null,
       selectedDate: stored.selectedDate ? new Date(stored.selectedDate) : new Date(),
       currentUserRole: stored.currentUserRole || 'planner',
+      currentOperator: stored.currentOperator || '计划员-系统',
     };
   }
   return {
@@ -85,9 +88,11 @@ const getInitialState = () => {
     maintenanceRules: initialRules,
     maintenanceHistories: initialHistories,
     partTrackings: initialParts,
+    planOperationLogs: [],
     selectedTrainId: null,
     selectedDate: new Date(),
     currentUserRole: 'planner' as const,
+    currentOperator: '计划员-系统',
   };
 };
 
@@ -104,9 +109,11 @@ interface AppState {
   maintenanceRules: MaintenanceRule[];
   maintenanceHistories: MaintenanceHistory[];
   partTrackings: PartTracking[];
+  planOperationLogs: PlanOperationLog[];
   selectedTrainId: string | null;
   selectedDate: Date;
   currentUserRole: 'planner' | 'worker' | 'inspector';
+  currentOperator: string;
   teams: { id: string; name: string }[];
 
   setSelectedTrainId: (id: string | null) => void;
@@ -125,6 +132,10 @@ interface AppState {
   updateTeamMemberWorkload: (memberId: string, workloadDelta: number) => void;
   generateMaintenanceSuggestion: (trainId: string, level: 'level1' | 'level2', date: string) => void;
   batchGenerateSuggestions: (importData: Array<{ trainId: string; mileage: number; level1Threshold: number; level2Threshold: number }>) => { success: string[]; failed: Array<{ trainNo: string; reason: string }> };
+  confirmPlan: (planId: string) => void;
+  rejectPlan: (planId: string, reason: string) => void;
+  addPlanOperationLog: (planId: string, action: PlanOperationLog['action'], description: string, oldValue?: string, newValue?: string) => void;
+  getPlanLogs: (planId: string) => PlanOperationLog[];
 }
 
 export const useAppStore = create<AppState>((set, get) => {
@@ -146,9 +157,11 @@ export const useAppStore = create<AppState>((set, get) => {
       maintenanceRules: toSave.maintenanceRules,
       maintenanceHistories: toSave.maintenanceHistories,
       partTrackings: toSave.partTrackings,
+      planOperationLogs: toSave.planOperationLogs,
       selectedTrainId: toSave.selectedTrainId,
       selectedDate: toSave.selectedDate.toISOString(),
       currentUserRole: toSave.currentUserRole,
+      currentOperator: toSave.currentOperator,
     });
   };
 
@@ -231,6 +244,37 @@ export const useAppStore = create<AppState>((set, get) => {
     },
 
     updateMaintenancePlan: (planId, updates) => {
+      const plan = get().maintenancePlans.find((p) => p.id === planId);
+      if (!plan) return;
+
+      let action: PlanOperationLog['action'] | null = null;
+      let description = '';
+      let oldValue = '';
+      let newValue = '';
+
+      if (updates.plannedStartDate !== undefined || updates.plannedEndDate !== undefined) {
+        action = 'date_changed';
+        oldValue = `${plan.plannedStartDate} ~ ${plan.plannedEndDate}`;
+        newValue = `${updates.plannedStartDate || plan.plannedStartDate} ~ ${updates.plannedEndDate || plan.plannedEndDate}`;
+        description = `调整检修日期：从 ${oldValue} 改为 ${newValue}`;
+      } else if (updates.level !== undefined) {
+        action = 'level_changed';
+        oldValue = plan.level === 'level1' ? '一级修' : '二级修';
+        newValue = updates.level === 'level1' ? '一级修' : '二级修';
+        description = `变更检修等级：从 ${oldValue} 改为 ${newValue}`;
+      } else if (updates.assignedTeam !== undefined) {
+        action = 'team_changed';
+        const oldTeam = plan.assignedTeam ? get().teams.find((t) => t.id === plan.assignedTeam)?.name : '未分配';
+        const newTeam = updates.assignedTeam ? get().teams.find((t) => t.id === updates.assignedTeam)?.name : '未分配';
+        oldValue = oldTeam || '未分配';
+        newValue = newTeam || '未分配';
+        description = `变更负责班组：从 ${oldValue} 改为 ${newValue}`;
+      }
+
+      if (action) {
+        get().addPlanOperationLog(planId, action, description, oldValue, newValue);
+      }
+
       set((state) => ({
         maintenancePlans: state.maintenancePlans.map((p) =>
           p.id === planId ? { ...p, ...updates } : p
@@ -339,25 +383,41 @@ export const useAppStore = create<AppState>((set, get) => {
       const success: string[] = [];
       const failed: Array<{ trainNo: string; reason: string }> = [];
       const newPlans: MaintenancePlan[] = [];
-      const newTasks: DispatchTask[] = [];
+      const newLogs: PlanOperationLog[] = [];
       let planCounter = 0;
 
-      importData.forEach((item) => {
+      importData.forEach((item, index) => {
         const train = trains.find((t) => t.id === item.trainId);
+        if (!item.trainId) {
+          failed.push({ trainNo: `车组${index + 1}`, reason: '未选择车组' });
+          return;
+        }
         if (!train) {
-          failed.push({ trainNo: '未知', reason: '车组不存在' });
+          failed.push({ trainNo: `车组${index + 1}`, reason: '车组不存在' });
           return;
         }
-        if (!item.mileage || item.mileage <= 0) {
-          failed.push({ trainNo: train.trainNo, reason: '里程数据无效' });
+        if (!item.mileage) {
+          failed.push({ trainNo: train.trainNo, reason: '里程未填写' });
           return;
         }
-        if (!item.level1Threshold || item.level1Threshold <= 0) {
-          failed.push({ trainNo: train.trainNo, reason: '一级修到期规则无效' });
+        if (isNaN(item.mileage) || item.mileage <= 0) {
+          failed.push({ trainNo: train.trainNo, reason: '里程数据无效，必须为大于0的数字' });
           return;
         }
-        if (!item.level2Threshold || item.level2Threshold <= 0) {
-          failed.push({ trainNo: train.trainNo, reason: '二级修到期规则无效' });
+        if (!item.level1Threshold) {
+          failed.push({ trainNo: train.trainNo, reason: '一级修到期规则未填写' });
+          return;
+        }
+        if (isNaN(item.level1Threshold) || item.level1Threshold <= 0) {
+          failed.push({ trainNo: train.trainNo, reason: '一级修到期规则无效，必须为大于0的数字' });
+          return;
+        }
+        if (!item.level2Threshold) {
+          failed.push({ trainNo: train.trainNo, reason: '二级修到期规则未填写' });
+          return;
+        }
+        if (isNaN(item.level2Threshold) || item.level2Threshold <= 0) {
+          failed.push({ trainNo: train.trainNo, reason: '二级修到期规则无效，必须为大于0的数字' });
           return;
         }
         if (item.level2Threshold <= item.level1Threshold) {
@@ -377,7 +437,7 @@ export const useAppStore = create<AppState>((set, get) => {
           const remaining = item.mileage - item.level1Threshold;
           daysToAdd = Math.min(Math.ceil(remaining / 500), 2);
         } else {
-          failed.push({ trainNo: train.trainNo, reason: '里程未达到任何检修阈值' });
+          failed.push({ trainNo: train.trainNo, reason: `里程 ${item.mileage} 未达到任何检修阈值（一级修${item.level1Threshold}，二级修${item.level2Threshold}）` });
           return;
         }
 
@@ -395,40 +455,111 @@ export const useAppStore = create<AppState>((set, get) => {
           level,
           plannedStartDate: suggestedDate,
           plannedEndDate: suggestedDate,
-          status: 'planned',
+          status: 'pending',
           workPackageId: workPackage?.id || 'wp1',
+          generatedFrom: 'import',
         });
 
-        if (workPackage) {
-          workPackage.procedures.forEach((proc, idx) => {
-            newTasks.push({
-              id: `task${Date.now()}_${planCounter}_${idx}`,
-              planId,
-              procedureId: proc.id,
-              procedureName: proc.name,
-              trainNo: train.trainNo,
-              teamId: '',
-              teamName: '待分配',
-              status: 'pending',
-            });
-          });
-        }
+        newLogs.push({
+          id: `log${Date.now()}_${planCounter}`,
+          planId,
+          action: 'created',
+          operator: get().currentOperator,
+          operateTime: new Date().toISOString(),
+          description: `导入生成检修建议：${level === 'level1' ? '一级修' : '二级修'}，建议日期 ${suggestedDate}，当前里程 ${item.mileage} 公里`,
+        });
 
-        success.push(`${train.trainNo} - ${level === 'level1' ? '一级修' : '二级修'}（建议${suggestedDate}）`);
+        success.push(`${train.trainNo} - ${level === 'level1' ? '一级修' : '二级修'}（建议${suggestedDate}，待确认）`);
       });
 
       if (newPlans.length > 0) {
         set((state) => ({
           maintenancePlans: [...state.maintenancePlans, ...newPlans],
-          dispatchTasks: [...state.dispatchTasks, ...newTasks],
+          planOperationLogs: [...state.planOperationLogs, ...newLogs],
         }));
         persist({
           maintenancePlans: get().maintenancePlans,
-          dispatchTasks: get().dispatchTasks,
+          planOperationLogs: get().planOperationLogs,
         });
       }
 
       return { success, failed };
+    },
+
+    confirmPlan: (planId) => {
+      const plan = get().maintenancePlans.find((p) => p.id === planId);
+      if (!plan || plan.status !== 'pending') return;
+
+      const workPackage = get().workPackages.find((wp) => wp.id === plan.workPackageId);
+      const newTasks: DispatchTask[] = [];
+
+      if (workPackage) {
+        workPackage.procedures.forEach((proc, idx) => {
+          newTasks.push({
+            id: `task${Date.now()}_${idx}`,
+            planId,
+            procedureId: proc.id,
+            procedureName: proc.name,
+            trainNo: plan.trainNo,
+            teamId: '',
+            teamName: '待分配',
+            status: 'pending',
+          });
+        });
+      }
+
+      set((state) => ({
+        maintenancePlans: state.maintenancePlans.map((p) =>
+          p.id === planId ? { ...p, status: 'planned' as const } : p
+        ),
+        dispatchTasks: [...state.dispatchTasks, ...newTasks],
+      }));
+
+      get().addPlanOperationLog(planId, 'confirmed', '计划员确认排程，计划正式生效');
+
+      persist({
+        maintenancePlans: get().maintenancePlans,
+        dispatchTasks: get().dispatchTasks,
+        planOperationLogs: get().planOperationLogs,
+      });
+    },
+
+    rejectPlan: (planId, reason) => {
+      const plan = get().maintenancePlans.find((p) => p.id === planId);
+      if (!plan || plan.status !== 'pending') return;
+
+      set((state) => ({
+        maintenancePlans: state.maintenancePlans.filter((p) => p.id !== planId),
+      }));
+
+      get().addPlanOperationLog(planId, 'rejected', `计划被驳回，原因：${reason}`);
+
+      persist({
+        maintenancePlans: get().maintenancePlans,
+        planOperationLogs: get().planOperationLogs,
+      });
+    },
+
+    addPlanOperationLog: (planId, action, description, oldValue, newValue) => {
+      const newLog: PlanOperationLog = {
+        id: `log${Date.now()}`,
+        planId,
+        action,
+        operator: get().currentOperator,
+        operateTime: new Date().toISOString(),
+        description,
+        oldValue,
+        newValue,
+      };
+      set((state) => ({
+        planOperationLogs: [...state.planOperationLogs, newLog],
+      }));
+    },
+
+    getPlanLogs: (planId) => {
+      return get()
+        .planOperationLogs.filter((log) => log.planId === planId)
+        .sort((a, b) => new Date(b.operateTime).getTime() - new Date(a.operateTime).getTime());
     },
   };
 });

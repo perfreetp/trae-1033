@@ -26,9 +26,16 @@ import {
   Plus,
   Trash2,
   Info,
+  Filter,
+  Clock,
+  User,
+  FileText,
+  ThumbsUp,
+  ThumbsDown,
+  XCircle,
 } from 'lucide-react';
 import { useAppStore } from '../../store';
-import type { MaintenancePlan } from '../../types';
+import type { MaintenancePlan, PlanOperationLog } from '../../types';
 import { cn } from '../../lib/utils';
 
 interface ImportItem {
@@ -46,9 +53,16 @@ export default function CalendarPage() {
     teams,
     updateMaintenancePlan,
     batchGenerateSuggestions,
+    confirmPlan,
+    rejectPlan,
+    getPlanLogs,
   } = useAppStore();
 
   const [currentMonth, setCurrentMonth] = useState(new Date());
+
+  const [filterTeam, setFilterTeam] = useState<string>('all');
+  const [filterLevel, setFilterLevel] = useState<string>('all');
+  const [filterStatus, setFilterStatus] = useState<string>('all');
 
   const [showImportModal, setShowImportModal] = useState(false);
   const [importItems, setImportItems] = useState<ImportItem[]>([
@@ -68,7 +82,30 @@ export default function CalendarPage() {
     assignedTeam: '',
   });
 
+  const [showRejectModal, setShowRejectModal] = useState(false);
+  const [rejectReason, setRejectReason] = useState('');
+
   const [showSuccess, setShowSuccess] = useState('');
+
+  const filteredPlans = useMemo(() => {
+    return maintenancePlans.filter((plan) => {
+      if (filterTeam !== 'all' && plan.assignedTeam !== filterTeam) {
+        return false;
+      }
+      if (filterLevel !== 'all' && plan.level !== filterLevel) {
+        return false;
+      }
+      if (filterStatus !== 'all' && plan.status !== filterStatus) {
+        return false;
+      }
+      return true;
+    });
+  }, [maintenancePlans, filterTeam, filterLevel, filterStatus]);
+
+  const planLogs = useMemo(() => {
+    if (!selectedPlan) return [];
+    return getPlanLogs(selectedPlan.id);
+  }, [selectedPlan, getPlanLogs]);
 
   const monthStart = startOfMonth(currentMonth);
   const monthEnd = endOfMonth(currentMonth);
@@ -82,7 +119,7 @@ export default function CalendarPage() {
   });
 
   const getPlansForDate = (date: Date): MaintenancePlan[] => {
-    return maintenancePlans.filter((plan) => {
+    return filteredPlans.filter((plan) => {
       const start = new Date(plan.plannedStartDate);
       const end = new Date(plan.plannedEndDate);
       const current = startOfDay(date);
@@ -97,6 +134,7 @@ export default function CalendarPage() {
   };
 
   const getPlanColor = (plan: MaintenancePlan): string => {
+    if (plan.status === 'pending') return 'bg-amber-500';
     if (isOverdue(plan)) return 'bg-red-500';
     return plan.level === 'level1' ? 'bg-blue-500' : 'bg-purple-500';
   };
@@ -228,6 +266,49 @@ export default function CalendarPage() {
     return teams.find((t) => t.id === teamId)?.name || '未分配';
   };
 
+  const handleConfirmPlan = () => {
+    if (!selectedPlan) return;
+    confirmPlan(selectedPlan.id);
+    setSelectedPlan({ ...selectedPlan, status: 'planned' });
+    setShowSuccess('计划已确认，正式生效！');
+    setTimeout(() => setShowSuccess(''), 3000);
+  };
+
+  const handleRejectPlan = () => {
+    if (!selectedPlan || !rejectReason.trim()) return;
+    rejectPlan(selectedPlan.id, rejectReason);
+    setShowRejectModal(false);
+    setShowDetailModal(false);
+    setSelectedPlan(null);
+    setRejectReason('');
+    setShowSuccess('计划已驳回');
+    setTimeout(() => setShowSuccess(''), 3000);
+  };
+
+  const getActionLabel = (action: PlanOperationLog['action']) => {
+    const labels: Record<string, string> = {
+      created: '创建',
+      date_changed: '日期调整',
+      level_changed: '等级变更',
+      team_changed: '班组变更',
+      confirmed: '确认排程',
+      rejected: '驳回',
+    };
+    return labels[action] || action;
+  };
+
+  const getActionColor = (action: PlanOperationLog['action']) => {
+    const colors: Record<string, string> = {
+      created: 'bg-blue-100 text-blue-700',
+      date_changed: 'bg-purple-100 text-purple-700',
+      level_changed: 'bg-indigo-100 text-indigo-700',
+      team_changed: 'bg-green-100 text-green-700',
+      confirmed: 'bg-green-100 text-green-700',
+      rejected: 'bg-red-100 text-red-700',
+    };
+    return colors[action] || 'bg-gray-100 text-gray-700';
+  };
+
   return (
     <div className="p-6 space-y-6 relative">
       {showSuccess && (
@@ -237,28 +318,93 @@ export default function CalendarPage() {
         </div>
       )}
 
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-gray-900">检修日历</h1>
-        <div className="flex items-center gap-4">
+      <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <h1 className="text-2xl font-bold text-gray-900">检修日历</h1>
+          <div className="flex items-center gap-4">
+            <button
+              onClick={() => setShowImportModal(true)}
+              className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+            >
+              <Upload className="w-4 h-4" />
+              导入数据
+            </button>
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-3 rounded-full bg-amber-500"></div>
+              <span className="text-sm text-gray-600">待确认</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-3 rounded-full bg-blue-500"></div>
+              <span className="text-sm text-gray-600">一级修</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-3 rounded-full bg-purple-500"></div>
+              <span className="text-sm text-gray-600">二级修</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-3 rounded-full bg-red-500"></div>
+              <span className="text-sm text-gray-600">超期</span>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-4 p-4 bg-gray-50 rounded-lg border border-gray-200">
+          <div className="flex items-center gap-2">
+            <Filter className="w-4 h-4 text-gray-500" />
+            <span className="text-sm font-medium text-gray-700">筛选条件：</span>
+          </div>
+          <div>
+            <select
+              value={filterLevel}
+              onChange={(e) => setFilterLevel(e.target.value)}
+              className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+            >
+              <option value="all">全部等级</option>
+              <option value="level1">一级修</option>
+              <option value="level2">二级修</option>
+            </select>
+          </div>
+          <div>
+            <select
+              value={filterTeam}
+              onChange={(e) => setFilterTeam(e.target.value)}
+              className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+            >
+              <option value="all">全部班组</option>
+              {teams.map((team) => (
+                <option key={team.id} value={team.id}>
+                  {team.name}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <select
+              value={filterStatus}
+              onChange={(e) => setFilterStatus(e.target.value)}
+              className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+            >
+              <option value="all">全部状态</option>
+              <option value="pending">待确认</option>
+              <option value="planned">已计划</option>
+              <option value="in_progress">进行中</option>
+              <option value="completed">已完成</option>
+              <option value="overdue">已超期</option>
+            </select>
+          </div>
           <button
-            onClick={() => setShowImportModal(true)}
-            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+            onClick={() => {
+              setFilterLevel('all');
+              setFilterTeam('all');
+              setFilterStatus('all');
+            }}
+            className="px-3 py-2 text-sm text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-lg transition-colors"
           >
-            <Upload className="w-4 h-4" />
-            导入数据
+            清空筛选
           </button>
-          <div className="flex items-center gap-2">
-            <div className="w-3 h-3 rounded-full bg-blue-500"></div>
-            <span className="text-sm text-gray-600">一级修</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="w-3 h-3 rounded-full bg-purple-500"></div>
-            <span className="text-sm text-gray-600">二级修</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="w-3 h-3 rounded-full bg-red-500"></div>
-            <span className="text-sm text-gray-600">超期</span>
-          </div>
+          <span className="text-sm text-gray-500 ml-auto">
+            共 {filteredPlans.length} 条计划
+          </span>
         </div>
       </div>
 
@@ -571,7 +717,7 @@ export default function CalendarPage() {
 
       {showDetailModal && selectedPlan && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-40">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-lg mx-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl mx-4 max-h-[90vh] flex flex-col">
             <div className="flex items-center justify-between p-4 border-b border-gray-200">
               <h3 className="text-lg font-semibold text-gray-800 flex items-center gap-2">
                 <Edit className="w-5 h-5 text-blue-600" />
@@ -587,7 +733,35 @@ export default function CalendarPage() {
                 <X className="w-5 h-5 text-gray-500" />
               </button>
             </div>
-            <div className="p-4 space-y-4">
+            <div className="p-4 space-y-4 overflow-y-auto flex-1">
+              {selectedPlan.status === 'pending' && (
+                <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+                  <div className="flex items-center gap-2 text-amber-700 font-medium mb-2">
+                    <Clock className="w-5 h-5" />
+                    待确认计划
+                  </div>
+                  <p className="text-sm text-amber-600 mb-3">
+                    该计划由导入生成，尚未确认排程。请确认后正式生效，确认后将自动生成派工任务。
+                  </p>
+                  <div className="flex gap-3">
+                    <button
+                      onClick={handleConfirmPlan}
+                      className="flex-1 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors flex items-center justify-center gap-2"
+                    >
+                      <ThumbsUp className="w-4 h-4" />
+                      确认排程
+                    </button>
+                    <button
+                      onClick={() => setShowRejectModal(true)}
+                      className="flex-1 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors flex items-center justify-center gap-2"
+                    >
+                      <ThumbsDown className="w-4 h-4" />
+                      驳回
+                    </button>
+                  </div>
+                </div>
+              )}
+
               <div className="bg-gray-50 p-3 rounded-lg">
                 <div className="grid grid-cols-2 gap-4 text-sm">
                   <div>
@@ -607,6 +781,8 @@ export default function CalendarPage() {
                           ? 'text-blue-600'
                           : selectedPlan.status === 'overdue'
                           ? 'text-red-600'
+                          : selectedPlan.status === 'pending'
+                          ? 'text-amber-600'
                           : 'text-gray-800'
                       )}
                     >
@@ -616,6 +792,8 @@ export default function CalendarPage() {
                         ? '进行中'
                         : selectedPlan.status === 'completed'
                         ? '已完成'
+                        : selectedPlan.status === 'pending'
+                        ? '待确认'
                         : '已超期'}
                     </span>
                   </div>
@@ -716,6 +894,39 @@ export default function CalendarPage() {
                   ))}
                 </select>
               </div>
+
+              <div className="border-t border-gray-200 pt-4">
+                <h4 className="font-medium text-gray-800 flex items-center gap-2 mb-3">
+                  <FileText className="w-4 h-4 text-gray-500" />
+                  操作记录
+                </h4>
+                <div className="space-y-2 max-h-48 overflow-y-auto">
+                  {planLogs.length > 0 ? (
+                    planLogs.map((log) => (
+                      <div key={log.id} className="flex gap-3 p-2 bg-gray-50 rounded-lg">
+                        <span className={cn('text-xs px-2 py-0.5 rounded-full h-fit', getActionColor(log.action))}>
+                          {getActionLabel(log.action)}
+                        </span>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm text-gray-800">{log.description}</p>
+                          <div className="flex items-center gap-3 mt-1 text-xs text-gray-500">
+                            <span className="flex items-center gap-1">
+                              <User className="w-3 h-3" />
+                              {log.operator}
+                            </span>
+                            <span className="flex items-center gap-1">
+                              <Clock className="w-3 h-3" />
+                              {format(new Date(log.operateTime), 'yyyy-MM-dd HH:mm')}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    ))
+                  ) : (
+                    <p className="text-sm text-gray-400 text-center py-4">暂无操作记录</p>
+                  )}
+                </div>
+              </div>
             </div>
             <div className="flex justify-end gap-3 p-4 border-t border-gray-200">
               <button
@@ -725,7 +936,7 @@ export default function CalendarPage() {
                 }}
                 className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
               >
-                取消
+                关闭
               </button>
               <button
                 onClick={handleEditSubmit}
@@ -733,6 +944,53 @@ export default function CalendarPage() {
               >
                 <Save className="w-4 h-4" />
                 保存修改
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showRejectModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-md mx-4">
+            <div className="flex items-center justify-between p-4 border-b border-gray-200">
+              <h3 className="text-lg font-semibold text-gray-800 flex items-center gap-2">
+                <XCircle className="w-5 h-5 text-red-600" />
+                驳回计划
+              </h3>
+              <button
+                onClick={() => setShowRejectModal(false)}
+                className="p-1 hover:bg-gray-100 rounded-lg transition-colors"
+              >
+                <X className="w-5 h-5 text-gray-500" />
+              </button>
+            </div>
+            <div className="p-4">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                驳回原因 <span className="text-red-500">*</span>
+              </label>
+              <textarea
+                value={rejectReason}
+                onChange={(e) => setRejectReason(e.target.value)}
+                placeholder="请填写驳回原因..."
+                rows={4}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500 outline-none resize-none"
+              />
+            </div>
+            <div className="flex justify-end gap-3 p-4 border-t border-gray-200">
+              <button
+                onClick={() => setShowRejectModal(false)}
+                className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+              >
+                取消
+              </button>
+              <button
+                onClick={handleRejectPlan}
+                disabled={!rejectReason.trim()}
+                className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+              >
+                <ThumbsDown className="w-4 h-4" />
+                确认驳回
               </button>
             </div>
           </div>

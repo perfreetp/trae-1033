@@ -10,6 +10,17 @@ export interface Train {
   status: 'running' | 'maintenance' | 'idle' | 'overdue';
 }
 
+export interface PlanOperationLog {
+  id: string;
+  planId: string;
+  action: 'created' | 'date_changed' | 'level_changed' | 'team_changed' | 'confirmed' | 'rejected';
+  operator: string;
+  operateTime: string;
+  description: string;
+  oldValue?: string;
+  newValue?: string;
+}
+
 export interface MaintenancePlan {
   id: string;
   trainId: string;
@@ -19,9 +30,10 @@ export interface MaintenancePlan {
   plannedEndDate: string;
   actualStartDate?: string;
   actualEndDate?: string;
-  status: 'planned' | 'in_progress' | 'completed' | 'overdue';
+  status: 'pending' | 'planned' | 'in_progress' | 'completed' | 'overdue';
   workPackageId: string;
   assignedTeam?: string;
+  generatedFrom?: 'import' | 'manual';
 }
 
 export interface Procedure {
