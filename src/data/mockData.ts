@@ -92,7 +92,7 @@ export const maintenancePlans: MaintenancePlan[] = [
     plannedEndDate: '2026-06-10',
     status: 'planned',
     workPackageId: 'wp1',
-    assignedTeam: '机电一班',
+    assignedTeam: 't1',
   },
   {
     id: 'plan2',
@@ -103,7 +103,7 @@ export const maintenancePlans: MaintenancePlan[] = [
     plannedEndDate: '2026-06-09',
     status: 'planned',
     workPackageId: 'wp2',
-    assignedTeam: '综合二班',
+    assignedTeam: 't4',
   },
   {
     id: 'plan3',
@@ -115,7 +115,7 @@ export const maintenancePlans: MaintenancePlan[] = [
     actualStartDate: '2026-06-06T08:00:00',
     status: 'in_progress',
     workPackageId: 'wp1',
-    assignedTeam: '机电一班',
+    assignedTeam: 't1',
   },
   {
     id: 'plan4',
@@ -126,7 +126,7 @@ export const maintenancePlans: MaintenancePlan[] = [
     plannedEndDate: '2026-06-03',
     status: 'overdue',
     workPackageId: 'wp1',
-    assignedTeam: '机电二班',
+    assignedTeam: 't2',
   },
   {
     id: 'plan5',
@@ -137,7 +137,7 @@ export const maintenancePlans: MaintenancePlan[] = [
     plannedEndDate: '2026-06-21',
     status: 'planned',
     workPackageId: 'wp2',
-    assignedTeam: '综合一班',
+    assignedTeam: 't3',
   },
 ];
 

@@ -27,7 +27,19 @@ const displayStatuses: Array<'pending' | 'assigned' | 'in_progress' | 'completed
   'completed',
 ];
 
-function TaskCard({ task, onAssign }: { task: DispatchTask; onAssign?: (taskId: string) => void }) {
+function TaskCard({
+  task,
+  onAssign,
+  workPackage,
+  procedure,
+  showDetails = false,
+}: {
+  task: DispatchTask;
+  onAssign?: (taskId: string) => void;
+  workPackage?: WorkPackage | null;
+  procedure?: Procedure | null;
+  showDetails?: boolean;
+}) {
   const config = statusConfig[task.status];
   const startTask = useAppStore((state) => state.startTask);
   const completeTask = useAppStore((state) => state.completeTask);
@@ -70,12 +82,24 @@ function TaskCard({ task, onAssign }: { task: DispatchTask; onAssign?: (taskId: 
 
       <div className="mb-3">
         <h4 className="text-sm font-semibold text-gray-900 mb-1">{task.procedureName}</h4>
+        {showDetails && workPackage && (
+          <p className="text-xs text-blue-600 mb-1">
+            📦 作业包：{workPackage.name}
+          </p>
+        )}
+        {showDetails && procedure && (
+          <p className="text-xs text-purple-600 mb-1">
+            ⏱️ 标准工时：{procedure.standardTime}分钟
+          </p>
+        )}
         <p className="text-xs text-gray-500">{task.teamName}</p>
       </div>
 
       <div className="flex items-center gap-2 text-xs text-gray-600 mb-3">
         <User className="w-3.5 h-3.5" />
-        <span>{task.assigneeName || '未分配'}</span>
+        <span>
+          负责人：<span className="font-medium">{task.assigneeName || '未分配'}</span>
+        </span>
       </div>
 
       {task.status === 'pending' && (
@@ -417,9 +441,21 @@ export default function DispatchBoard() {
                   </span>
                 </div>
                 <div className="flex-1 overflow-auto space-y-3 pr-1">
-                  {tasksByStatus[status]?.map((task) => (
-                    <TaskCard key={task.id} task={task} onAssign={handleOpenAssignModal} />
-                  ))}
+                  {tasksByStatus[status]?.map((task) => {
+                    const procedure = selectedWorkPackage?.procedures.find(
+                      (p) => p.id === task.procedureId
+                    );
+                    return (
+                      <TaskCard
+                        key={task.id}
+                        task={task}
+                        onAssign={handleOpenAssignModal}
+                        workPackage={selectedWorkPackage}
+                        procedure={procedure}
+                        showDetails={!!selectedPlanId}
+                      />
+                    );
+                  })}
                   {(!tasksByStatus[status] || tasksByStatus[status].length === 0) && (
                     <div className="flex flex-col items-center justify-center py-8 text-gray-400">
                       <AlertCircle className="w-8 h-8 mb-2" />

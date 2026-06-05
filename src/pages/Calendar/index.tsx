@@ -118,8 +118,13 @@ export default function CalendarPage() {
     return d;
   });
 
+  const pendingPlans = useMemo(() => {
+    return filteredPlans.filter((plan) => plan.status === 'pending');
+  }, [filteredPlans]);
+
   const getPlansForDate = (date: Date): MaintenancePlan[] => {
     return filteredPlans.filter((plan) => {
+      if (plan.status === 'pending') return false;
       const start = new Date(plan.plannedStartDate);
       const end = new Date(plan.plannedEndDate);
       const current = startOfDay(date);
@@ -403,10 +408,51 @@ export default function CalendarPage() {
             清空筛选
           </button>
           <span className="text-sm text-gray-500 ml-auto">
-            共 {filteredPlans.length} 条计划
+            共 {filteredPlans.filter(p => p.status !== 'pending').length} 条正式计划，{pendingPlans.length} 条待确认
           </span>
         </div>
       </div>
+
+      {pendingPlans.length > 0 && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
+          <div className="flex items-center gap-2 mb-4">
+            <Clock className="w-5 h-5 text-amber-600" />
+            <h3 className="text-lg font-semibold text-amber-800">待确认检修建议（{pendingPlans.length}）</h3>
+            <span className="text-sm text-amber-600 ml-2">导入生成后需计划员确认生效</span>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+            {pendingPlans.map((plan) => (
+              <div
+                key={plan.id}
+                onClick={() => handlePlanClick(plan)}
+                className="bg-white border border-amber-200 rounded-lg p-4 cursor-pointer hover:shadow-md transition-shadow"
+              >
+                <div className="flex items-start justify-between mb-2">
+                  <div>
+                    <span className="font-semibold text-gray-900">{plan.trainNo}</span>
+                    <span className="ml-2 text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">
+                      待确认
+                    </span>
+                  </div>
+                  <span className={cn(
+                    'text-xs px-2 py-0.5 rounded-full text-white',
+                    plan.level === 'level1' ? 'bg-blue-500' : 'bg-purple-500'
+                  )}>
+                    {plan.level === 'level1' ? '一级修' : '二级修'}
+                  </span>
+                </div>
+                <div className="text-sm text-gray-600 space-y-1">
+                  <p>建议日期：{plan.plannedStartDate}</p>
+                  <p className="text-amber-600 flex items-center gap-1">
+                    <AlertTriangle className="w-3.5 h-3.5" />
+                    点击查看详情并确认/驳回
+                  </p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="bg-white rounded-xl shadow-sm border border-gray-200">
         <div className="flex items-center justify-between p-4 border-b border-gray-200">
